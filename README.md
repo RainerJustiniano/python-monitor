@@ -12,10 +12,11 @@ Aplicação desktop com interface gráfica que monitora em tempo real os contain
 1. [O que o projeto demonstra](#o-que-o-projeto-demonstra)
 2. [Arquitetura geral](#arquitetura-geral)
 3. [Pré-requisitos e instalação](#pré-requisitos-e-instalação)
-4. [Como executar](#como-executar)
+4. [Solução de problemas](#solução-de-problemas-leia-antes-de-pedir-ajuda)
 5. [Explicação do código, arquivo por arquivo](#explicação-do-código-arquivo-por-arquivo)
 6. [Perguntas que podem surgir na apresentação](#perguntas-que-podem-surgir-na-apresentação)
-7. [Testes realizados](#testes-realizados)
+7. [Limitação conhecida: podman stats](#limitação-conhecida-podman-stats-pode-subestimar-a-cpu)
+8. [Testes realizados](#testes-realizados)
 
 ---
 
@@ -65,24 +66,97 @@ Aplicação desktop com interface gráfica que monitora em tempo real os contain
 
 ## Pré-requisitos e instalação
 
-```bash
-# Tkinter precisa estar instalado no sistema (não vem só com pip)
-sudo apt install -y python3-tk
+> **Importante:** siga os passos NA ORDEM, e rode o comando de verificação depois de cada um. Pular um passo é a causa mais comum dos erros "ModuleNotFoundError".
 
-# Bibliotecas Python do projeto
+### Passo 1 — Clonar os dois repositórios
+
+Este painel monitora a infraestrutura do `projeto-iac` — então você precisa dos dois:
+
+```bash
+cd ~
+git clone https://github.com/RainerJustiniano/projeto-iac.git
+git clone https://github.com/RainerJustiniano/python-monitor.git
+```
+
+### Passo 2 — Instalar Podman e subir a infraestrutura
+
+```bash
+sudo apt update
+sudo apt install -y podman ansible sshpass git
+
+cd ~/projeto-iac
+bash setup.sh
+```
+
+**Verificação:**
+```bash
+podman ps -a
+```
+✅ Espera-se ver 5 containers: `dns`, `adminsrv`, `worksrv`, `datastore`, `client` — todos "Up".
+
+### Passo 3 — Instalar o `tkinter` (pacote de sistema, **não é só pip**)
+
+```bash
+sudo apt install -y python3-tk
+```
+
+**Verificação:**
+```bash
+python3 -c "import tkinter; print('tkinter OK')"
+```
+✅ Deve imprimir `tkinter OK`. Se der erro aqui, **não avance** — o programa não vai abrir.
+
+### Passo 4 — Instalar as bibliotecas Python do projeto
+
+```bash
+cd ~/python-monitor
 pip install -r requirements.txt --break-system-packages
 ```
 
-Requer também o Podman instalado e os containers da infraestrutura (`projeto-iac`) já criados — veja [o outro repositório](https://github.com/RainerJustiniano/projeto-iac) para subir essa parte.
+**Verificação:**
+```bash
+python3 -c "import customtkinter, matplotlib, psutil; print('Bibliotecas OK')"
+```
+✅ Deve imprimir `Bibliotecas OK`. Se dar `ModuleNotFoundError`, o comando de instalação acima não rodou direito — role para cima e veja se apareceu algum erro em vermelho na saída dele, ou rode de novo.
+
+### Passo 5 — Rodar o painel
+
+```bash
+python3 main.py
+```
+
+A janela deve abrir mostrando os 5 containers.
 
 ---
 
-## Como executar
+## Solução de problemas (leia antes de pedir ajuda!)
+
+| Erro / Sintoma | Causa | Solução |
+|---|---|---|
+| `ModuleNotFoundError: No module named 'tkinter'` | Pacote de sistema não instalado (pip não resolve isso) | `sudo apt install -y python3-tk` |
+| `ModuleNotFoundError: No module named 'customtkinter'` | Passo 4 não foi executado, ou falhou silenciosamente | Rode de novo: `pip install -r requirements.txt --break-system-packages` e confira a verificação do Passo 4 |
+| `❌ O comando 'podman' não foi encontrado` | Podman não instalado nessa máquina | `sudo apt install -y podman` |
+| Tabela aparece **vazia**, sem nenhum container | Os containers do `projeto-iac` não estão rodando | `cd ~/projeto-iac && bash setup.sh` |
+| Janela **não abre**, nenhum erro aparece | Falta ambiente gráfico no WSL (sem WSLg) | Veja a seção abaixo "Janela não abre" |
+| Erro ao rodar `pip install` mencionando "externally-managed-environment" | Proteção do Python 3.12+ contra instalar pacotes globalmente | Use a flag `--break-system-packages` (já está no comando do Passo 4) |
+| CPU mostra **0.0%** mesmo com containers em uso | Comportamento normal — só mostra CPU de containers com status `running` | Inicie o container com o botão **▶ Start** no próprio painel |
+| Tentou testar pelo **GitHub Codespaces** e não funcionou | Codespaces é uma máquina na nuvem — não tem Podman, não tem os containers, e não tem tela gráfica | Esse painel só funciona no WSL/Linux **local**, onde os containers realmente existem |
+
+### "Janela não abre" — verificando o ambiente gráfico
 
 ```bash
-podman ps -a        # confirme que os containers existem
-python3 main.py      # abre o painel
+echo $DISPLAY
 ```
+
+- Se aparecer algo como `:0` → ambiente gráfico OK, o problema é outro (confira os passos acima)
+- Se vier **vazio** → seu WSL não tem suporte gráfico (WSLg). Isso normalmente já vem ativado por padrão no **Windows 11**. Se estiver no Windows 10, instale o WSLg manualmente ou atualize para o Windows 11.
+
+Teste rápido para confirmar se o WSLg está funcionando, independente do nosso programa:
+```bash
+sudo apt install -y x11-apps
+xclock
+```
+Se um relógio aparecer na tela, o ambiente gráfico está OK.
 
 ---
 
