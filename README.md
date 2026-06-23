@@ -1,90 +1,147 @@
-# Painel de Monitoramento — Infraestrutura Corporativa
+# Painel de Monitoramento de Infraestrutura em Python
 
-**Trabalho da disciplina de Lógica de Programação em Python**
-Instituto Federal de Mato Grosso — Campus Cuiabá
-
-Aplicação desktop com interface gráfica que monitora em tempo real os containers Podman da infraestrutura corporativa desenvolvida na disciplina de Conteinerização e Orquestração ([`projeto-iac`](https://github.com/RainerJustiniano/projeto-iac)).
+**Instituto Federal de Mato Grosso — Campus Cuiabá**
+**Disciplina:** Lógica de Programação em Python
 
 ---
 
 ## Sumário
 
-1. [O que o projeto demonstra](#o-que-o-projeto-demonstra)
-2. [Arquitetura geral](#arquitetura-geral)
-3. [Pré-requisitos e instalação](#pré-requisitos-e-instalação)
-4. [Solução de problemas](#solução-de-problemas-leia-antes-de-pedir-ajuda)
-5. [Explicação do código, arquivo por arquivo](#explicação-do-código-arquivo-por-arquivo)
-6. [Perguntas que podem surgir na apresentação](#perguntas-que-podem-surgir-na-apresentação)
-7. [Limitação conhecida: podman stats](#limitação-conhecida-podman-stats-pode-subestimar-a-cpu)
-8. [Testes realizados](#testes-realizados)
+1. [Introdução](#1-introdução)
+2. [Objetivos](#2-objetivos)
+3. [Arquitetura do Sistema](#3-arquitetura-do-sistema)
+4. [Tecnologias e Bibliotecas Utilizadas](#4-tecnologias-e-bibliotecas-utilizadas)
+5. [Estrutura do Projeto](#5-estrutura-do-projeto)
+6. [Descrição dos Módulos](#6-descrição-dos-módulos)
+7. [Instalação](#7-instalação)
+8. [Execução](#8-execução)
+9. [Funcionalidades](#9-funcionalidades)
+10. [Testes e Validação](#10-testes-e-validação)
+11. [Limitações e Observações Técnicas](#11-limitações-e-observações-técnicas)
+12. [Conclusão](#12-conclusão)
 
 ---
 
-## O que o projeto demonstra
+## 1. Introdução
 
-| Requisito da disciplina | Onde está no código |
-|---|---|
-| Biblioteca externa (interface gráfica) | `customtkinter` em `app.py` |
-| Biblioteca externa (gráficos) | `matplotlib` em `charts.py` |
-| Biblioteca externa (monitoramento do host) | `psutil` em `app.py` |
-| Interface gráfica | Janela completa com tabela, gráfico, botões e log |
-| Monitoramento | Containers Podman (CPU, memória, status) em tempo real |
-| Programação orientada a objetos | Classes `MonitorApp`, `LiveChart`, `ContainerInfo` |
-| Threading / concorrência | Coleta de dados em thread separada (`threading.Thread`) |
-| Comunicação entre threads | `queue.Queue` (forma segura de levar dados até a interface) |
-| Tratamento de exceções | `PodmanNotFoundError`, `PodmanCommandError`, blocos try/except |
-| Manipulação de arquivos | Exportação CSV (`csv`), logging em arquivo (`logging`) |
-| Estruturas de dados | `dataclass`, `deque` (histórico do gráfico), listas/dicionários |
-| **Conjuntos (`set`)** | `unique_states()` em `podman_client.py` — estados distintos dos containers |
-| **`match`/`case`** | `_container_action()` em `app.py` — despacha start/stop/restart |
-| **`break`/`continue`** | `list_containers()` — pula registros malformados sem travar |
-| **Leitura de arquivo (`open(..., "r")`)** | `_view_log()` em `app.py` — lê e exibe o `monitor.log` salvo |
-| **`try`/`except`/`else`/`finally`** | `_export_csv()` — fluxo completo com os 4 blocos |
-| **`logging.debug()`** | Grava detalhes de cada ciclo de coleta só no arquivo (console mostra só INFO+) |
-| Subprocessos | `subprocess` para executar comandos `podman` |
-| Parsing de dados | `json` para interpretar a saída do Podman |
+Este projeto consiste em uma aplicação desktop, desenvolvida em Python, com interface gráfica para monitoramento em tempo real de uma infraestrutura de containers Podman. A aplicação foi desenvolvida como trabalho da disciplina de Lógica de Programação em Python, utilizando como alvo de monitoramento a infraestrutura corporativa simulada desenvolvida na disciplina de Conteinerização e Orquestração (projeto `projeto-iac`), integrando o conteúdo de ambas as disciplinas em uma única solução funcional.
 
----
+A aplicação permite visualizar, em tempo real, o estado de cada container (em execução ou parado), o consumo de CPU e memória, além de oferecer controles para iniciar, parar e reiniciar containers diretamente pela interface gráfica.
 
-## Arquitetura geral
+## 2. Objetivos
+
+O desenvolvimento deste projeto teve como objetivo aplicar, de forma prática e integrada, os principais tópicos abordados na ementa da disciplina:
+
+- Variáveis, tipos de dados e estruturas de dados (listas, dicionários, conjuntos, tuplas)
+- Estruturas de condição (`if`/`elif`/`else`, `match`/`case`)
+- Estruturas de repetição (`while`, `for`, `continue`)
+- Funções e expressões `lambda`
+- Manipulação de arquivos (leitura e escrita)
+- Tratamento de exceções (`try`/`except`/`else`/`finally`, `raise`)
+- Registro de eventos (módulo `logging`)
+- Programação orientada a objetos (classes, encapsulamento)
+- Utilização de bibliotecas externas (interface gráfica, gráficos, monitoramento de sistema)
+- Concorrência (`threading`) e comunicação segura entre threads (`queue`)
+
+## 3. Arquitetura do Sistema
+
+A aplicação é estruturada em duas linhas de execução (threads) que operam de forma independente e se comunicam por meio de uma fila (`queue.Queue`):
 
 ```
-┌──────────────────┐      queue.Queue()      ┌───────────────────┐
-│  THREAD DE COLETA │ ─────────────────────▶ │  THREAD PRINCIPAL  │
-│  (segundo plano)  │                         │  (interface/GUI)   │
-│                    │                         │                     │
-│  • podman ps -a    │                         │  • lê a fila a      │
-│  • podman stats    │                         │    cada 500ms       │
-│  • psutil (host)   │                         │  • atualiza tabela  │
-│  • sleep(4s)        │                         │  • redesenha gráfico│
-└──────────────────┘                         └───────────────────┘
+┌────────────────────┐      queue.Queue()      ┌─────────────────────┐
+│  THREAD DE COLETA   │ ──────────────────────▶ │  THREAD PRINCIPAL    │
+│  (segundo plano)     │                         │  (interface gráfica)  │
+│                      │                         │                       │
+│  • podman ps -a      │                         │  • lê a fila a cada   │
+│  • podman stats      │                         │    500ms              │
+│  • podman top        │                         │  • atualiza a tabela  │
+│  • psutil (host)      │                         │  • redesenha o gráfico│
+└────────────────────┘                         └─────────────────────┘
 ```
 
-**Por que duas threads?** Os comandos `podman` podem demorar um pouco para responder. Se a interface gráfica esperasse essa resposta diretamente, a janela "congelaria" (ficaria sem resposta a cliques) durante esse tempo. Por isso, a coleta de dados roda em uma thread separada, em loop, e só entrega o resultado pronto para a tela através de uma fila (`queue.Queue`) — que é a forma seguro de mover dados entre threads no Tkinter, já que widgets gráficos não podem ser alterados diretamente de fora da thread principal.
+A separação em duas threads é necessária porque os comandos executados via `subprocess` (chamadas ao Podman) podem levar tempo para responder. Caso essa espera ocorresse na mesma thread responsável pela interface gráfica, a janela ficaria momentaneamente sem resposta a cada ciclo de atualização. A thread de coleta roda em segundo plano, depositando os dados coletados em uma fila; a thread principal apenas consome essa fila em intervalos curtos e atualiza os elementos visuais, sem nunca aguardar diretamente a resposta de um comando externo.
 
----
+## 4. Tecnologias e Bibliotecas Utilizadas
 
-## Pré-requisitos e instalação
+| Biblioteca | Tipo | Finalidade |
+|---|---|---|
+| `customtkinter` | Externa | Construção da interface gráfica |
+| `matplotlib` | Externa | Renderização do gráfico de uso de CPU em tempo real |
+| `psutil` | Externa | Coleta de métricas do sistema operacional hospedeiro |
+| `subprocess` | Padrão | Execução de comandos do Podman |
+| `json` | Padrão | Interpretação da saída estruturada do Podman |
+| `threading` | Padrão | Execução concorrente da coleta de dados |
+| `queue` | Padrão | Comunicação segura entre threads |
+| `logging` | Padrão | Registro de eventos da aplicação |
+| `csv` | Padrão | Exportação de dados estruturados |
+| `dataclasses` | Padrão | Definição de estruturas de dados simplificadas |
+| `collections.deque` | Padrão | Manutenção de um histórico de tamanho fixo para o gráfico |
 
-> **Importante:** siga os passos NA ORDEM, e rode o comando de verificação depois de cada um. Pular um passo é a causa mais comum dos erros "ModuleNotFoundError".
+## 5. Estrutura do Projeto
 
-### Passo 1 — Clonar os dois repositórios
+```
+python-monitor/
+│
+├── main.py              # Ponto de entrada da aplicação
+├── app.py                # Interface gráfica e orquestração da aplicação
+├── podman_client.py       # Camada de comunicação com o Podman
+├── charts.py              # Componente de gráfico em tempo real
+├── logger_config.py       # Configuração do sistema de registro de eventos
+├── requirements.txt       # Dependências externas do projeto
+├── exports/                # Diretório de destino dos arquivos CSV exportados
+└── monitor.log              # Arquivo de log gerado em tempo de execução
+```
 
-Este painel monitora a infraestrutura do `projeto-iac` — então você precisa dos dois:
+## 6. Descrição dos Módulos
+
+### 6.1 `main.py`
+
+Ponto de entrada da aplicação. É responsável por inicializar o sistema de registro de eventos, verificar a disponibilidade do comando `podman` no sistema operacional e, em caso afirmativo, instanciar e executar a interface gráfica. A verificação prévia da disponibilidade do Podman evita que a aplicação seja iniciada em um ambiente sem os pré-requisitos necessários, apresentando uma mensagem de erro compreensível em vez de uma exceção não tratada.
+
+### 6.2 `podman_client.py`
+
+Módulo responsável exclusivamente pela comunicação com o Podman, sem qualquer dependência da interface gráfica — caracterizando uma separação de responsabilidades. A comunicação ocorre por meio do módulo `subprocess`, invocando os comandos do Podman e interpretando a saída no formato JSON.
+
+Principais funções:
+
+- `list_containers()`: retorna a lista de containers existentes, representados por instâncias da classe `ContainerInfo` (uma `dataclass`).
+- `unique_states(containers)`: retorna um conjunto (`set`) com os estados distintos presentes na lista de containers, sem repetição.
+- `get_stats(name)`: retorna as métricas de uso de CPU e memória de um container específico.
+- `_cpu_percent_via_top(name)`: calcula o uso de CPU somando o percentual de cada processo individual do container, utilizado como fonte alternativa de dados (ver seção 11).
+- `start_container`, `stop_container`, `restart_container`: controlam o ciclo de vida de um container.
+
+O módulo define também duas exceções customizadas, `PodmanNotFoundError` e `PodmanCommandError`, permitindo que falhas sejam tratadas de forma específica pelas camadas superiores da aplicação.
+
+### 6.3 `charts.py`
+
+Define a classe `LiveChart`, responsável por renderizar um gráfico de linha em tempo real utilizando a biblioteca `matplotlib`, embutido na interface gráfica. O histórico de valores é mantido em uma estrutura `deque` com tamanho máximo fixo, de forma que apenas as últimas trinta amostras permaneçam visíveis, evitando crescimento indefinido de memória e mantendo a legibilidade do gráfico. O eixo vertical do gráfico ajusta seu limite superior dinamicamente quando o valor de CPU monitorado excede o teto atual.
+
+### 6.4 `app.py`
+
+Módulo principal da interface gráfica, contendo a classe `MonitorApp`. Reúne três responsabilidades centrais: a construção dos elementos visuais, a coleta periódica de dados em uma thread separada, e o tratamento das interações do usuário (seleção de containers, botões de controle, exportação de dados).
+
+Funcionalidades de destaque implementadas neste módulo:
+
+- Estrutura de condição `match`/`case` para o despacho das ações de iniciar, parar e reiniciar um container.
+- Comunicação entre threads via `queue.Queue`, evitando acesso concorrente direto aos elementos da interface gráfica.
+- Exportação de dados para arquivo CSV, implementada com a sequência completa de blocos `try`/`except`/`else`/`finally`.
+- Leitura do arquivo de log persistido em disco, demonstrando a operação complementar à exportação (escrita seguida de leitura de arquivo).
+
+### 6.5 `logger_config.py`
+
+Configura o sistema de registro de eventos da aplicação utilizando o módulo padrão `logging`. São definidos dois manipuladores (*handlers*) distintos: um manipulador de arquivo, que registra todas as mensagens, incluindo as de nível `DEBUG`; e um manipulador de console, que exibe apenas mensagens de nível `INFO` ou superior, evitando a poluição visual do terminal durante a utilização normal da aplicação.
+
+## 7. Instalação
+
+Os passos a seguir devem ser executados em ambiente Linux (ou WSL, no caso de sistemas Windows) com Python 3.10 ou superior instalado.
+
+### 7.1 Pré-requisito: infraestrutura monitorada
+
+Esta aplicação monitora os containers definidos no projeto `projeto-iac`. É necessário que essa infraestrutura esteja em execução antes de utilizar o painel.
 
 ```bash
-cd ~
 git clone https://github.com/RainerJustiniano/projeto-iac.git
-git clone https://github.com/RainerJustiniano/python-monitor.git
-```
-
-### Passo 2 — Instalar Podman e subir a infraestrutura
-
-```bash
-sudo apt update
-sudo apt install -y podman ansible sshpass git
-
-cd ~/projeto-iac
+cd projeto-iac
 bash setup.sh
 ```
 
@@ -92,11 +149,21 @@ bash setup.sh
 ```bash
 podman ps -a
 ```
-✅ Espera-se ver 5 containers: `dns`, `adminsrv`, `worksrv`, `datastore`, `client` — todos "Up".
+Devem ser exibidos cinco containers (`dns`, `adminsrv`, `worksrv`, `datastore`, `client`), todos com status "Up".
 
-### Passo 3 — Instalar o `tkinter` (pacote de sistema, **não é só pip**)
+### 7.2 Clonagem do repositório
 
 ```bash
+git clone https://github.com/RainerJustiniano/python-monitor.git
+cd python-monitor
+```
+
+### 7.3 Instalação do Tkinter (dependência de sistema)
+
+O `customtkinter` depende do `tkinter`, que é um pacote de sistema e não é instalado automaticamente pelo gerenciador de pacotes Python (`pip`).
+
+```bash
+sudo apt update
 sudo apt install -y python3-tk
 ```
 
@@ -104,12 +171,11 @@ sudo apt install -y python3-tk
 ```bash
 python3 -c "import tkinter; print('tkinter OK')"
 ```
-✅ Deve imprimir `tkinter OK`. Se der erro aqui, **não avance** — o programa não vai abrir.
+A saída esperada é `tkinter OK`. Caso ocorra um erro nesta etapa, a aplicação não poderá ser iniciada.
 
-### Passo 4 — Instalar as bibliotecas Python do projeto
+### 7.4 Instalação das dependências Python
 
 ```bash
-cd ~/python-monitor
 pip install -r requirements.txt --break-system-packages
 ```
 
@@ -117,248 +183,61 @@ pip install -r requirements.txt --break-system-packages
 ```bash
 python3 -c "import customtkinter, matplotlib, psutil; print('Bibliotecas OK')"
 ```
-✅ Deve imprimir `Bibliotecas OK`. Se dar `ModuleNotFoundError`, o comando de instalação acima não rodou direito — role para cima e veja se apareceu algum erro em vermelho na saída dele, ou rode de novo.
+A saída esperada é `Bibliotecas OK`.
 
-### Passo 5 — Rodar o painel
+## 8. Execução
 
 ```bash
 python3 main.py
 ```
 
-A janela deve abrir mostrando os 5 containers.
+Ao ser executada, a aplicação verifica a disponibilidade do Podman, inicia o sistema de registro de eventos, e abre a janela principal exibindo a tabela de containers, atualizada automaticamente em intervalos de quatro segundos.
 
----
+## 9. Funcionalidades
 
-## Solução de problemas (leia antes de pedir ajuda!)
-
-| Erro / Sintoma | Causa | Solução |
-|---|---|---|
-| `ModuleNotFoundError: No module named 'tkinter'` | Pacote de sistema não instalado (pip não resolve isso) | `sudo apt install -y python3-tk` |
-| `ModuleNotFoundError: No module named 'customtkinter'` | Passo 4 não foi executado, ou falhou silenciosamente | Rode de novo: `pip install -r requirements.txt --break-system-packages` e confira a verificação do Passo 4 |
-| `❌ O comando 'podman' não foi encontrado` | Podman não instalado nessa máquina | `sudo apt install -y podman` |
-| Tabela aparece **vazia**, sem nenhum container | Os containers do `projeto-iac` não estão rodando | `cd ~/projeto-iac && bash setup.sh` |
-| Janela **não abre**, nenhum erro aparece | Falta ambiente gráfico no WSL (sem WSLg) | Veja a seção abaixo "Janela não abre" |
-| Erro ao rodar `pip install` mencionando "externally-managed-environment" | Proteção do Python 3.12+ contra instalar pacotes globalmente | Use a flag `--break-system-packages` (já está no comando do Passo 4) |
-| CPU mostra **0.0%** mesmo com containers em uso | Comportamento normal — só mostra CPU de containers com status `running` | Inicie o container com o botão **▶ Start** no próprio painel |
-| Tentou testar pelo **GitHub Codespaces** e não funcionou | Codespaces é uma máquina na nuvem — não tem Podman, não tem os containers, e não tem tela gráfica | Esse painel só funciona no WSL/Linux **local**, onde os containers realmente existem |
-
-### "Janela não abre" — verificando o ambiente gráfico
-
-```bash
-echo $DISPLAY
-```
-
-- Se aparecer algo como `:0` → ambiente gráfico OK, o problema é outro (confira os passos acima)
-- Se vier **vazio** → seu WSL não tem suporte gráfico (WSLg). Isso normalmente já vem ativado por padrão no **Windows 11**. Se estiver no Windows 10, instale o WSLg manualmente ou atualize para o Windows 11.
-
-Teste rápido para confirmar se o WSLg está funcionando, independente do nosso programa:
-```bash
-sudo apt install -y x11-apps
-xclock
-```
-Se um relógio aparecer na tela, o ambiente gráfico está OK.
-
----
-
-## Explicação do código, arquivo por arquivo
-
-### `main.py` — ponto de entrada
-
-É o primeiro arquivo executado. Faz três coisas, em ordem:
-
-1. Configura o sistema de logging (`setup_logger()`)
-2. Verifica se o comando `podman` existe na máquina (`shutil.which("podman")`) — se não existir, mostra uma mensagem amigável em vez de deixar o programa quebrar com um erro feio
-3. Cria a janela principal (`MonitorApp`) e entra no loop da interface (`app.mainloop()`)
-
-```python
-if shutil.which("podman") is None:
-    print("❌ O comando 'podman' não foi encontrado...")
-    return 1
-```
-
-Esse tipo de verificação chama-se **validação prévia** — checar as condições necessárias antes de tentar usar um recurso, evitando que o erro apareça de forma confusa mais tarde.
-
----
-
-### `podman_client.py` — a "ponte" com o Podman
-
-Esse arquivo não sabe nada sobre interface gráfica. Sua única responsabilidade é conversar com o Podman e devolver dados já organizados. Essa separação (interface não se mistura com lógica de dados) é uma boa prática chamada **separação de responsabilidades**.
-
-**Como ele conversa com o Podman:** o Podman não tem uma "biblioteca Python oficial" simples de usar — então chamamos ele como se fosse um comando de terminal, usando `subprocess`:
-
-```python
-result = subprocess.run(["podman", "ps", "-a", "--format", "json"], ...)
-```
-
-A flag `--format json` faz o Podman devolver a resposta em **JSON** em vez de texto solto — daí usamos `json.loads()` para transformar isso em listas e dicionários do Python, fáceis de manipular.
-
-**Principais funções:**
-
-| Função | O que faz |
+| Funcionalidade | Descrição |
 |---|---|
-| `list_containers()` | Lista todos os containers e devolve uma lista de objetos `ContainerInfo` |
-| `get_stats(name)` | Pega CPU% e memória de um container específico (só funciona se ele estiver rodando) |
-| `start_container(name)` / `stop_container(name)` / `restart_container(name)` | Controlam o ciclo de vida do container |
-| `inspect_ip(name)` | Descobre o IP do container dentro da rede |
+| Listagem de containers | Tabela com nome, status, uso de CPU, memória e portas, atualizada automaticamente |
+| Seleção de container | Exibe detalhes e gráfico de CPU em tempo real do container selecionado |
+| Controle de containers | Botões para iniciar, parar e reiniciar o container selecionado |
+| Exportação de dados | Geração de arquivo CSV com o estado atual de todos os containers |
+| Consulta de log | Leitura e exibição das últimas linhas do arquivo de log da aplicação |
+| Métricas do host | Exibição do uso de CPU e memória da própria máquina, via `psutil` |
+| Atualização manual | Botão para forçar uma nova coleta de dados sem aguardar o intervalo automático |
 
-**A classe `ContainerInfo`** é um `@dataclass` — um jeito mais simples de criar uma classe que só guarda dados, sem precisar escrever `__init__` na mão:
+## 10. Testes e Validação
 
-```python
-@dataclass
-class ContainerInfo:
-    name: str
-    image: str
-    status: str
-    state: str
-    ports: str = "—"
-    cpu_percent: float = 0.0
-```
+A camada de comunicação com o Podman (`podman_client.py`) foi validada por meio de testes com dados simulados (*mocks*), cobrindo os seguintes cenários:
 
-**Tratamento de erros:** criamos duas exceções personalizadas (`PodmanNotFoundError` e `PodmanCommandError`) em vez de deixar o Python mostrar um erro genérico. Isso permite que o resto do programa saiba exatamente *o que* deu errado e decida o que fazer — por exemplo, mostrar uma mensagem amigável na tela em vez de travar.
+- Listagem de containers em execução e parados, com e sem portas mapeadas
+- Filtragem de registros malformados (ausência do campo identificador)
+- Interpretação de diferentes formatos de retorno do comando `podman stats`
+- Comportamento da função de estatísticas quando o container não possui dados disponíveis
 
----
+A interface gráfica foi validada de ponta a ponta utilizando um servidor de display virtual (Xvfb), com containers reais em execução, confirmando:
 
-### `charts.py` — o gráfico de CPU ao vivo
+- Preenchimento correto da tabela de containers
+- Atualização periódica dos dados via thread e fila
+- Funcionamento dos controles de iniciar e parar containers
+- Geração e leitura correta dos arquivos exportados
+- Atualização das métricas do host tanto no ciclo automático quanto na atualização manual
 
-A classe `LiveChart` embrulha um gráfico do **matplotlib** dentro de um widget que o Tkinter entende (`FigureCanvasTkAgg`).
+## 11. Limitações e Observações Técnicas
 
-**A parte mais interessante é o histórico com tamanho fixo:**
+### 11.1 Subestimação do uso de CPU pelo comando `podman stats`
 
-```python
-self.history: deque[float] = deque(maxlen=self.MAX_POINTS)
-```
+Em ambientes Podman configurados em modo *rootless*, com o gerenciador de cgroups operando em modo "hybrid", observou-se que o comando `podman stats` pode subestimar significativamente o uso de CPU quando processos adicionais são criados dentro do container por meio do comando `podman exec -d`. Em um cenário de teste com cinco processos consumindo aproximadamente 73% de CPU cada (confirmado via `podman top`), o `podman stats` reportou apenas 3,75% de uso total.
 
-Um `deque` (fila de duas pontas) com `maxlen=30` funciona como uma lista normal, mas quando você adiciona o 31º item, o primeiro item é **automaticamente descartado**. Isso evita que o gráfico cresça para sempre e fique cada vez mais lento — sempre mostramos só os últimos 30 segundos de uso de CPU.
+Como correção, a função `get_stats()` calcula o uso de CPU por dois métodos distintos — pelo `podman stats` tradicional e pela soma do percentual individual de cada processo via `podman top` — e adota o maior valor entre os dois resultados, corrigindo a subestimação sem comprometer o funcionamento em ambientes onde o `podman stats` opera corretamente.
 
-```python
-def update(self, value: float) -> None:
-    self.history.append(value)
-    ...
-    self.canvas.draw_idle()
-```
+### 11.2 Compatibilidade com ambientes sem suporte gráfico
 
-Cada vez que chega um novo valor de CPU, ele entra no `deque` e o gráfico é redesenhado.
+A aplicação requer um ambiente com suporte a interface gráfica (servidor X ou equivalente). Em ambientes WSL, isso depende do WSLg, disponibilizado por padrão em instalações recentes do Windows 11. A aplicação não é compatível com ambientes de execução em nuvem sem suporte gráfico, como o GitHub Codespaces, uma vez que estes não possuem acesso à infraestrutura Podman monitorada nem a um servidor de exibição gráfica.
+
+## 12. Conclusão
+
+O projeto demonstra a aplicação prática de conceitos fundamentais e avançados da linguagem Python em um cenário de monitoramento de infraestrutura real, integrando programação orientada a objetos, concorrência, tratamento de exceções, manipulação de arquivos e utilização de bibliotecas externas em uma solução funcional e validada. A escolha de monitorar uma infraestrutura previamente desenvolvida em outra disciplina permitiu a integração de conhecimentos de duas áreas distintas — conteinerização e desenvolvimento de software — em um único projeto coeso.
 
 ---
 
-### `app.py` — a interface gráfica (o arquivo mais importante)
-
-Contém a classe `MonitorApp`, que herda de `ctk.CTk` (a janela principal do CustomTkinter). É o maior arquivo porque junta três responsabilidades: montar a tela, coletar dados em segundo plano, e reagir aos cliques do usuário.
-
-**1. Montagem da tela** — vários métodos `_build_*`:
-
-```python
-def _build_layout(self):
-    self._build_top_bar()         # título, botões, métricas do host
-    self._build_container_table()  # tabela de containers
-    self._build_detail_panel()     # gráfico + botões start/stop/restart
-    self._build_log_panel()        # log de eventos
-```
-
-Dividir a construção da tela em vários métodos pequenos (em vez de um `__init__` gigante) facilita entender e modificar cada parte separadamente.
-
-**2. A thread de coleta** — roda para sempre em segundo plano:
-
-```python
-def _poll_loop(self):
-    while self._running:
-        containers = pc.list_containers()
-        stats = {c.name: pc.get_stats(c.name) for c in containers if c.state == "running"}
-        self._data_queue.put({"containers": containers, "stats": stats, ...})
-        time.sleep(self._refresh_interval)
-```
-
-**3. A leitura da fila, na thread principal:**
-
-```python
-def _poll_queue(self):
-    try:
-        while True:
-            data = self._data_queue.get_nowait()
-            self._update_ui(data)
-    except queue.Empty:
-        pass
-    self.after(500, self._poll_queue)  # se chama de novo em 500ms
-```
-
-O método `self.after(500, ...)` é um recurso do próprio Tkinter: "espere 500ms e rode essa função de novo". Isso cria um laço de atualização **sem travar a interface**, bem diferente de um `while True` comum, que bloquearia a tela.
-
-**4. Ações do usuário** (Start/Stop/Restart): cada clique dispara uma nova thread curta, para que mesmo um comando que demore um pouco não trave a tela:
-
-```python
-def _container_action(self, action):
-    def run():
-        message = actions[action](name)
-        self._log(message)
-    threading.Thread(target=run, daemon=True).start()
-```
-
-**5. Exportar CSV** — usa o módulo padrão `csv` para gravar os dados atuais em arquivo:
-
-```python
-with open(filepath, "w", newline="", encoding="utf-8") as f:
-    writer = csv.writer(f)
-    writer.writerow(["nome", "imagem", "status", "estado", "portas"])
-    for c in self._last_containers:
-        writer.writerow([c.name, c.image, c.status, c.state, c.ports])
-```
-
----
-
-### `logger_config.py` — registro de eventos
-
-Configura o módulo padrão `logging` para escrever simultaneamente:
-- no arquivo `monitor.log` (fica salvo mesmo depois de fechar o programa)
-- no console (útil durante o desenvolvimento)
-
-```python
-file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
-console_handler = logging.StreamHandler()
-```
-
-Diferente de simplesmente usar `print()`, o `logging` permite níveis de gravidade (`INFO`, `ERROR`, etc.) e grava automaticamente a data/hora de cada evento — essencial para depois conseguir auditar o que aconteceu.
-
----
-
-## Perguntas que podem surgir na apresentação
-
-**"Por que não usar `print()` em vez de `logging`?"**
-`print()` só mostra na tela; some quando o terminal fecha. `logging` grava em arquivo permanentemente e permite níveis de gravidade — importante para depurar problemas depois que o programa já foi fechado.
-
-**"Por que precisa de duas threads? Não dava pra fazer tudo numa só?"**
-Daria, mas a tela ficaria "congelada" (sem responder a cliques) durante todo o tempo em que o programa estivesse esperando a resposta do comando `podman`, que pode demorar. Com duas threads, a tela continua respondendo normalmente enquanto a coleta acontece por trás.
-
-**"O que aconteceria se eu não usasse `queue.Queue` para comunicar as threads?"**
-Tkinter (a base do customtkinter) não foi feito para ser alterado por mais de uma thread ao mesmo tempo. Mexer direto nos widgets de dentro da thread de coleta pode causar comportamento imprevisível ou travamentos aleatórios. A fila resolve isso: a thread de coleta só *deposita* dados, e só a thread principal *usa* esses dados para atualizar a tela.
-
-**"O que é um `dataclass`? Por que usar em vez de uma classe normal?"**
-É um recurso do Python que gera automaticamente o `__init__` e outros métodos repetitivos quando a classe serve só para guardar dados (como `ContainerInfo`). Economiza código sem perder clareza.
-
-**"O que acontece se o Podman não estiver instalado?"**
-O programa verifica isso *antes* de tentar abrir a janela (`main.py`) e mostra uma mensagem clara em vez de travar com um erro técnico confuso.
-
----
-
-## Limitação conhecida: `podman stats` pode subestimar a CPU
-
-Em ambientes Podman **rootless** com cgroups em modo "hybrid" (comum no WSL), processos criados dentro do container via `podman exec -d` às vezes não são contabilizados corretamente pelo `podman stats`. Em um teste real, com 5 processos `yes` consumindo ~73% de CPU cada (confirmado via `podman top`), o `podman stats` reportava apenas **3.75%** — um valor claramente incorreto.
-
-**Solução implementada:** `get_stats()` agora calcula a CPU de duas formas — pelo `podman stats` tradicional e somando o `%CPU` de cada processo via `podman top` — e usa o **maior valor entre as duas**. Isso corrige a subestimação nesse cenário, sem prejudicar ambientes onde `podman stats` já funciona normalmente.
-
-Como a soma de vários processos pode superar 100% (cada núcleo conta separadamente), o gráfico (`charts.py`) também foi ajustado para **esticar o eixo Y automaticamente** quando o valor passa do teto atual, em vez de cortar a linha no topo.
-
----
-
-## Testes realizados
-
-A lógica de parsing (`podman_client.py`) foi validada com dados simulados (mock de `subprocess`), cobrindo:
-- Container em execução com portas mapeadas
-- Container parado sem portas
-- Estatísticas de CPU/memória em formatos diferentes
-- Container sem estatísticas disponíveis (retorno `None`)
-
-A interface completa foi testada de ponta a ponta com um display virtual (Xvfb) e containers reais, confirmando listagem correta na tabela, atualização periódica via thread+queue, exportação de CSV e métricas do host via `psutil`.
-
----
-
-*Projeto desenvolvido para a disciplina de Lógica de Programação em Python — IFMT Campus Cuiabá*
+*Trabalho desenvolvido para a disciplina de Lógica de Programação em Python — Instituto Federal de Mato Grosso, Campus Cuiabá.*

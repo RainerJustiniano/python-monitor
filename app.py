@@ -375,7 +375,20 @@ class MonitorApp(ctk.CTk):
                 for c in containers if c.state == "running"
             }
             stats_by_name = {k: v for k, v in stats_by_name.items() if v}
-            self._data_queue.put({"containers": containers, "stats": stats_by_name, "host": None, "error": None})
+
+            host_stats = None
+            if PSUTIL_AVAILABLE:
+                host_stats = {
+                    "cpu": psutil.cpu_percent(interval=None),
+                    "mem": psutil.virtual_memory().percent,
+                }
+
+            self._data_queue.put({
+                "containers": containers,
+                "stats": stats_by_name,
+                "host": host_stats,
+                "error": None,
+            })
         except Exception as exc:
             self._data_queue.put({"error": str(exc)})
 
