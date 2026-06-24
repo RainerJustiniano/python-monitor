@@ -158,20 +158,21 @@ git clone https://github.com/RainerJustiniano/python-monitor.git
 cd python-monitor
 ```
 
-### 7.3 Instalação do Tkinter (dependência de sistema)
+### 7.3 Instalação do Tkinter e do gerenciador de pacotes Python (dependências de sistema)
 
-O `customtkinter` depende do `tkinter`, que é um pacote de sistema e não é instalado automaticamente pelo gerenciador de pacotes Python (`pip`).
+O `customtkinter` depende do `tkinter`, que é um pacote de sistema e não é instalado automaticamente pelo gerenciador de pacotes Python (`pip`). Em algumas instalações mínimas (comum em distribuições Linux recentes, como Ubuntu 25.x), o próprio `pip` também não vem pré-instalado.
 
 ```bash
 sudo apt update
-sudo apt install -y python3-tk
+sudo apt install -y python3-tk python3-pip
 ```
 
 **Verificação:**
 ```bash
 python3 -c "import tkinter; print('tkinter OK')"
+pip --version
 ```
-A saída esperada é `tkinter OK`. Caso ocorra um erro nesta etapa, a aplicação não poderá ser iniciada.
+A primeira saída esperada é `tkinter OK`; a segunda deve exibir o número de versão do `pip`, sem erro de "command not found". Caso ocorra um erro nesta etapa, a aplicação não poderá ser iniciada.
 
 ### 7.4 Instalação das dependências Python
 
